@@ -92,8 +92,8 @@ class AttentionMetadata:
     # in block 0, and 1st slot in block 1, respectively.
     slot_mapping: torch.Tensor
 
-    # Max number of tokens per sequence, input + output. Some models need this info to pick model settings based on estimated total sequence length.
-    max_seq_tokens_tensor: torch.Tensor
+    # Original input tokens
+    num_orig_input_tokens_tensor: torch.Tensor
 
     @property
     @abstractmethod
@@ -134,7 +134,7 @@ class AttentionMetadataBuilder(ABC, Generic[T]):
         raise NotImplementedError
 
     @abstractmethod
-    def build(self, seq_lens: List[int], query_lens: List[int], max_seq_tokens_list: List[int],
+    def build(self, seq_lens: List[int], query_lens: List[int], num_orig_input_tokens_list: List[int],
               cuda_graph_pad_size: int, batch_size: int) -> T:
         """Build attention metadata with on-device tensors."""
         raise NotImplementedError
