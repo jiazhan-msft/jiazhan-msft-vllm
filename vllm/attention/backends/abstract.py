@@ -134,7 +134,7 @@ class AttentionMetadataBuilder(ABC, Generic[T]):
         raise NotImplementedError
 
     @abstractmethod
-    def build(self, seq_lens: List[int], query_lens: List[int],
+    def build(self, seq_lens: List[int], query_lens: List[int], max_seq_tokens_list: List[int],
               cuda_graph_pad_size: int, batch_size: int) -> T:
         """Build attention metadata with on-device tensors."""
         raise NotImplementedError
