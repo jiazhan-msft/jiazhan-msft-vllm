@@ -92,6 +92,9 @@ class AttentionMetadata:
     # in block 0, and 1st slot in block 1, respectively.
     slot_mapping: torch.Tensor
 
+    # Max number of tokens per sequence, input + output. Some models need this info to pick model settings based on estimated total sequence length.
+    max_seq_tokens_tensor: torch.Tensor
+
     @property
     @abstractmethod
     def prefill_metadata(self) -> Optional["AttentionMetadata"]:
