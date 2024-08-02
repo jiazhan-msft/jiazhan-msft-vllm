@@ -222,11 +222,11 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
             self.input_tokens = [[] for _ in range(self.n_seqs)]
             self.input_positions = [[] for _ in range(self.n_seqs)]
+            self.num_orig_input_tokens_list = [[] for _ in range(self.n_seqs)]
             self.seq_lens = [0] * self.n_seqs
             self.orig_seq_lens = [0] * self.n_seqs
             self.query_lens = [0] * self.n_seqs
             self.context_lens = [0] * self.n_seqs
-            self.num_orig_input_tokens_list = [0] * self.n_seqs
             self.curr_sliding_window_blocks = [0] * self.n_seqs
 
             self.lora_index_mapping = [[] for _ in range(self.n_seqs)]
@@ -314,9 +314,10 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         inter_data.seq_lens[seq_idx] = seq_len
         inter_data.orig_seq_lens[seq_idx] = seq_len
         inter_data.context_lens[seq_idx] = context_len
-        inter_data.num_orig_input_tokens_list[seq_idx] = seq_data.get_prompt_len()
         inter_data.input_tokens[seq_idx] = tokens
         inter_data.input_positions[seq_idx] = list(range(context_len, seq_len))
+        inter_data.num_orig_input_tokens_list[seq_idx] = [seq_data.get_prompt_len()] * (seq_len - context_len)
+        
         inter_data.query_lens[
             seq_idx] = seq_len - context_len if inter_data.is_prompt else 1
 
@@ -479,6 +480,11 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             flatten_2d_lists(inter_data.input_positions)
             for inter_data in self.inter_data_list
         ])
+        num_orig_input_tokens_list = flatten_2d_lists([
+            flatten_2d_lists(inter_data.num_orig_input_tokens_list)
+            for inter_data in self.inter_data_list
+        ])
+        
         seq_lens = []
         max_decode_seq_len = 0
         for inter_data in self.inter_data_list:
@@ -514,6 +520,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         # Tokens and positions.
         input_tokens.extend([0] * cuda_graph_pad_size)
         input_positions.extend([0] * cuda_graph_pad_size)
+        num_orig_input_tokens_list.extend([0] * cuda_graph_pad_size)
+
         input_tokens_tensor = torch.tensor(input_tokens,
                                            dtype=torch.long,
                                            device=self.runner.device)
@@ -524,9 +532,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         # Sequence and query lengths.
         seq_lens.extend([1] * cuda_graph_pad_size)
 
-        num_orig_input_tokens_list = []
-        for inter_data in self.inter_data_list:
-            num_orig_input_tokens_list.extend(inter_data.num_orig_input_tokens_list)
 
         # Attention metadata.
         attn_metadata = self.attn_metadata_builder.build(
