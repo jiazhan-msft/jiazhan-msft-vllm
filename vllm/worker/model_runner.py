@@ -195,8 +195,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         query_lens: List[int] = field(default_factory=list)
         # The number of tokens that are already computed.
         context_lens: List[int] = field(default_factory=list)
-        # Max number of tokens of each sequence, input + output, i.e., by input + SamplingParams.max_tokens
-        max_seq_tokens_list: List[int] = field(default_factory=list)
+        # Number of original input tokens of each sequence
+        num_orig_input_tokens_list: List[int] = field(default_factory=list)
 
         # The current sliding window block.
         curr_sliding_window_blocks: List[int] = field(default_factory=list)
@@ -226,7 +226,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             self.orig_seq_lens = [0] * self.n_seqs
             self.query_lens = [0] * self.n_seqs
             self.context_lens = [0] * self.n_seqs
-            self.max_seq_tokens_list = [0] * self.n_seqs
+            self.num_orig_input_tokens_list = [0] * self.n_seqs
             self.curr_sliding_window_blocks = [0] * self.n_seqs
 
             self.lora_index_mapping = [[] for _ in range(self.n_seqs)]
@@ -314,7 +314,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         inter_data.seq_lens[seq_idx] = seq_len
         inter_data.orig_seq_lens[seq_idx] = seq_len
         inter_data.context_lens[seq_idx] = context_len
-        inter_data.max_seq_tokens_list[seq_idx] = seq_len + seq_group_metadata.sampling_params.max_tokens if seq_group_metadata.sampling_params.max_tokens else self.runner.model_config.max_model_len
+        inter_data.num_orig_input_tokens_list[seq_idx] = seq_data.get_prompt_len()
         inter_data.input_tokens[seq_idx] = tokens
         inter_data.input_positions[seq_idx] = list(range(context_len, seq_len))
         inter_data.query_lens[
@@ -524,13 +524,13 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         # Sequence and query lengths.
         seq_lens.extend([1] * cuda_graph_pad_size)
 
-        max_seq_tokens_list = []
+        num_orig_input_tokens_list = []
         for inter_data in self.inter_data_list:
-            max_seq_tokens_list.extend(inter_data.max_seq_tokens_list)
+            num_orig_input_tokens_list.extend(inter_data.num_orig_input_tokens_list)
 
         # Attention metadata.
         attn_metadata = self.attn_metadata_builder.build(
-            seq_lens, query_lens, max_seq_tokens_list,  cuda_graph_pad_size, batch_size)
+            seq_lens, query_lens, num_orig_input_tokens_list,  cuda_graph_pad_size, batch_size)
 
         # LoRA data.
         lora_requests = set()
@@ -1004,7 +1004,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         slot_mapping = torch.empty(max_batch_size, dtype=torch.long).cuda()
         slot_mapping.fill_(_PAD_SLOT_ID)
         seq_lens = torch.ones(max_batch_size, dtype=torch.int32).cuda()
-        max_seq_tokens_tensor = torch.zeros(max_batch_size, dtype=torch.int32).cuda()
+        num_orig_input_tokens_tensor = torch.zeros(max_batch_size, dtype=torch.int32).cuda()
         block_tables = torch.from_numpy(self.graph_block_tables).cuda()
         intermediate_inputs = None
         if not get_pp_group().is_first_rank:
@@ -1112,7 +1112,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
                             slot_mapping=slot_mapping[:batch_size],
                             seq_lens=None,
                             seq_lens_tensor=seq_lens[:batch_size],
-                            max_seq_tokens_tensor=max_seq_tokens_tensor[:batch_size],
+                            num_orig_input_tokens_tensor=num_orig_input_tokens_tensor[:batch_size],
                             max_query_len=None,
                             max_prefill_seq_len=0,
                             max_decode_seq_len=self.max_seq_len_to_capture,
@@ -1463,7 +1463,7 @@ class CUDAGraphRunner:
                 "seq_lens_tensor":
                 attn_metadata.decode_metadata.seq_lens_tensor,
                 "block_tables": attn_metadata.decode_metadata.block_tables,
-                "max_seq_tokens_tensor": attn_metadata.max_seq_tokens_tensor,
+                "num_orig_input_tokens_tensor": attn_metadata.num_orig_input_tokens_tensor,
                 **kwargs,
             }
         if intermediate_inputs is not None:
@@ -1499,8 +1499,8 @@ class CUDAGraphRunner:
                 non_blocking=True)
             self.input_buffers["block_tables"].copy_(
                 attn_metadata.decode_metadata.block_tables, non_blocking=True)
-            self.input_buffers["max_seq_tokens_tensor"].copy_(
-                attn_metadata.max_seq_tokens_tensor, non_blocking=True)
+            self.input_buffers["num_orig_input_tokens_tensor"].copy_(
+                attn_metadata.num_orig_input_tokens_tensor, non_blocking=True)
         
         if "seqlen_agnostic_capture_inputs" in self.input_buffers:
             self.model.copy_inputs_before_cuda_graphs(self.input_buffers,
