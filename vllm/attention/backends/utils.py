@@ -147,7 +147,7 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
                                  seq_len, context_len, start_idx,
                                  self.block_size, inter_data.block_tables)
 
-    def build(self, seq_lens: List[int], query_lens: List[int],
+    def build(self, seq_lens: List[int], query_lens: List[int], num_orig_input_tokens_list: List[int],
               cuda_graph_pad_size: int, batch_size: int):
         for inter_data in self.input_builder.inter_data_list:
             self._add_seq_group(inter_data,
@@ -214,6 +214,8 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
                      dim=0,
                      dtype=query_start_loc.dtype,
                      out=query_start_loc[1:])
+        
+        num_orig_input_tokens_tensor = torch.tensor(num_orig_input_tokens_list, dtype=torch.long, device=device)
 
         slot_mapping_tensor = torch.tensor(self.slot_mapping,
                                            dtype=torch.long,
@@ -226,6 +228,7 @@ class CommonMetadataBuilder(AttentionMetadataBuilder[TAttentionMetadata]):
             num_decode_tokens=num_decode_tokens,
             seq_lens=seq_lens,
             seq_lens_tensor=seq_lens_tensor,
+            num_orig_input_tokens_tensor=num_orig_input_tokens_tensor,
             max_query_len=max_query_len,
             max_prefill_seq_len=max_prefill_seq_len,
             max_decode_seq_len=max_decode_seq_len,
