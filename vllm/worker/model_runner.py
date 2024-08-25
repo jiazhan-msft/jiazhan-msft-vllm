@@ -1218,8 +1218,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         # Prepare dummy inputs. These will be reused for all batch sizes.
         max_batch_size = max(_BATCH_SIZES_TO_CAPTURE)
         input_tokens = torch.zeros(max_batch_size, dtype=torch.long).cuda()
-        input_positions = torch.zeros(max_batch_size, dtype=torch.long).cuda()
-        
+        input_positions = torch.zeros(max_batch_size, dtype=torch.long).cuda()        
         # Prepare dummy previous_hidden_states only if needed by the model.
         # This is used by draft models such as EAGLE.
         previous_hidden_states = None
