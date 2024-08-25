@@ -198,6 +198,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             input_tokens: Optional[List[List[int]]] = None,
             input_positions: Optional[List[List[int]]] = None,
 
+            # The number of original input tokens of each sequence
+            num_orig_input_tokens_list: Optional[List[List[int]]] = None,
             # The sequence length (may be capped to the sliding window).
             seq_lens: Optional[List[int]] = None,
             # The original sequence length (before applying sliding window).
@@ -348,6 +350,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
             self.input_tokens = [[] for _ in range(self.n_seqs)]
             self.input_positions = [[] for _ in range(self.n_seqs)]
+            self.num_orig_input_tokens_list = [[] for _ in range(self.n_seqs)]
             self.seq_lens = [0] * self.n_seqs
             self.orig_seq_lens = [0] * self.n_seqs
             self.query_lens = [0] * self.n_seqs
@@ -655,6 +658,11 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             for cur_input_positions in inter_data.input_positions:
                 input_positions.extend(cur_input_positions)
 
+        num_orig_input_tokens_list = []
+        for inter_data in self.inter_data_list:
+            for cur_num_orig_input_tokens_list in inter_data.num_orig_input_tokens_list:
+                num_orig_input_tokens_list.extend(cur_num_orig_input_tokens_list)
+
         seq_lens = []
         max_decode_seq_len = 0
         for inter_data in self.inter_data_list:
@@ -691,6 +699,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         if cuda_graph_pad_size:
             input_tokens.extend(itertools.repeat(0, cuda_graph_pad_size))
             input_positions.extend(itertools.repeat(0, cuda_graph_pad_size))
+            num_orig_input_tokens_list.extend(itertools.repeat(0, cuda_graph_pad_size))
+            
         assert self.runner.device is not None
         input_tokens_tensor = async_tensor_h2d(input_tokens, torch.long,
                                                self.runner.device,
@@ -705,7 +715,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
         # Attention metadata.
         attn_metadata = self.attn_metadata_builder.build(
-            seq_lens, query_lens, cuda_graph_pad_size, batch_size)
+            seq_lens, query_lens, num_orig_input_tokens_list, cuda_graph_pad_size, batch_size)
 
         # LoRA data.
         lora_requests = set()
@@ -1193,6 +1203,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         max_batch_size = max(_BATCH_SIZES_TO_CAPTURE)
         input_tokens = torch.zeros(max_batch_size, dtype=torch.long).cuda()
         input_positions = torch.zeros(max_batch_size, dtype=torch.long).cuda()
+        num_orig_input_tokens_tensor = torch.zeros(max_batch_size, dtype=torch.int32).cuda()
 
         # Prepare dummy previous_hidden_states only if needed by the model.
         # This is used by draft models such as EAGLE.
@@ -1602,6 +1613,9 @@ class CUDAGraphRunner:
         self.input_buffers["positions"].copy_(positions, non_blocking=True)
         self.input_buffers["slot_mapping"].copy_(attn_metadata.slot_mapping,
                                                  non_blocking=True)
+        self.input_buffers["num_orig_input_tokens_tensor"].copy_(
+                attn_metadata.num_orig_input_tokens_tensor, non_blocking=True)
+        
         self.attn_state.prepare_graph_input_buffers(self.input_buffers,
                                                     attn_metadata)
         if "seqlen_agnostic_capture_inputs" in self.input_buffers:
