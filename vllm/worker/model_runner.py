@@ -172,6 +172,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         def simple_reinit(self):
             self.input_tokens[0].clear()  # type: ignore
             self.input_positions[0].clear()  # type: ignore
+            self.num_orig_input_tokens_list[0].clear() 
             self.seq_lens[0] = 0  # type: ignore
             self.orig_seq_lens[0] = 0  # type: ignore
             self.query_lens[0] = 0  # type: ignore
@@ -259,6 +260,12 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                         for seq_id in range(len(self.seq_ids)):
                             self.input_positions[seq_id].clear()
 
+                    if num_orig_input_tokens_list:
+                        self.num_orig_input_tokens_list = num_orig_input_tokens_list
+                    else:
+                        for seq_id in range(len(self.seq_ids)):
+                            self.num_orig_input_tokens_list[seq_id].clear()
+
                     if seq_lens:
                         self.seq_lens = seq_lens
                     else:
@@ -320,6 +327,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             else:
                 self.input_tokens = input_tokens or []
                 self.input_positions = input_positions or []
+                self.num_orig_input_tokens_list = num_orig_input_tokens_list or []
                 self.seq_lens = seq_lens or []
                 self.orig_seq_lens = orig_seq_lens or []
                 self.query_lens = query_lens or []
@@ -483,6 +491,12 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         else:
             inter_data.input_positions[seq_idx].extend(
                 range(context_len, seq_len))
+            
+        if (seq_len - context_len) == 1:
+            inter_data.num_orig_input_tokens_list[seq_idx].append(seq_data.get_prompt_len())
+        else:
+            inter_data.num_orig_input_tokens_list[seq_idx].extend(
+                [seq_data.get_prompt_len()] * (seq_len - context_len))
 
         inter_data.query_lens[
             seq_idx] = seq_len - context_len if inter_data.is_prompt else 1
@@ -515,6 +529,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             inter_data.input_tokens[seq_idx] = inter_data.input_tokens[
                 seq_idx][context_len:]
             inter_data.input_positions[seq_idx] = inter_data.input_positions[
+                seq_idx][context_len:]
+            inter_data.num_orig_input_tokens_list[seq_idx] = inter_data.num_orig_input_tokens_list[
                 seq_idx][context_len:]
             inter_data.context_lens[seq_idx] = context_len
             inter_data.query_lens[
@@ -1203,8 +1219,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         max_batch_size = max(_BATCH_SIZES_TO_CAPTURE)
         input_tokens = torch.zeros(max_batch_size, dtype=torch.long).cuda()
         input_positions = torch.zeros(max_batch_size, dtype=torch.long).cuda()
-        num_orig_input_tokens_tensor = torch.zeros(max_batch_size, dtype=torch.int32).cuda()
-
+        
         # Prepare dummy previous_hidden_states only if needed by the model.
         # This is used by draft models such as EAGLE.
         previous_hidden_states = None
@@ -1613,8 +1628,6 @@ class CUDAGraphRunner:
         self.input_buffers["positions"].copy_(positions, non_blocking=True)
         self.input_buffers["slot_mapping"].copy_(attn_metadata.slot_mapping,
                                                  non_blocking=True)
-        self.input_buffers["num_orig_input_tokens_tensor"].copy_(
-                attn_metadata.num_orig_input_tokens_tensor, non_blocking=True)
         
         self.attn_state.prepare_graph_input_buffers(self.input_buffers,
                                                     attn_metadata)
