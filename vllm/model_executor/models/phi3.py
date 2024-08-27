@@ -57,6 +57,9 @@ class Phi3Attention(LlamaAttention):
             bias=bias,
             cache_config=cache_config,
             prefix=prefix)
+        
+        self.rope_scaling = config.rope_scaling
+
 
     def forward(
         self,
@@ -68,7 +71,7 @@ class Phi3Attention(LlamaAttention):
         qkv, _ = self.qkv_proj(hidden_states)
         q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
         q, k =  self.rotary_emb(positions, q, k) \
-            if attn_metadata is None or attn_metadata.num_orig_input_tokens_tensor is None \
+            if self.rope_scaling is None \
             else self.rotary_emb(positions, q, k, num_orig_input_tokens_tensor=attn_metadata.num_orig_input_tokens_tensor)
             
         attn_output = self.attn(q, k, v, kv_cache, attn_metadata)
